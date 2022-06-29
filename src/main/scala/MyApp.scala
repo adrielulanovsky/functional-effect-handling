@@ -18,9 +18,9 @@ object MyApp extends IOApp {
   // repeat
   def echoForever: IO[Nothing] = {
     val program = for {
-      line <- readLine("Enter a line: ")
-      _    <- putStrLn(line)
-    } yield ()
+      s <- readLine("reading")
+      _ <- putStrLn(s)
+    } yield s
     program.foreverM
   }
 

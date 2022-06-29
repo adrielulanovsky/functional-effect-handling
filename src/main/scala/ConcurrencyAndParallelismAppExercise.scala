@@ -7,7 +7,7 @@ object ConcurrencyAndParallelismAppExercise extends IOApp {
   case class Quote(author: String, text: String)
 
   def fetchHttp(n: Int): IO[List[Quote]] =
-    IO.sleep(10.millis) *>
+    IO.sleep(10.seconds) *>
       (1 to n).toList.map(i => Quote(s"author $i", s"text $i")).pure[IO]
 
   def fetchDb(n: Int): IO[List[Quote]] =
@@ -21,13 +21,15 @@ object ConcurrencyAndParallelismAppExercise extends IOApp {
   override def run(args: List[String]): IO[ExitCode] = {
     val n = 3
 
+    val x = IO.blocking()
+
     // fetch n quotes from the fastest source
     // calculate the average age of the authors
     IO.race(fetchHttp(n), fetchDb(n))
-      .flatMap { _.fold(identity, identity).parTraverse(q => fetchAuthorAge(q.author)) }
-      .flatTap(IO.println)
-      .map( ages => ages.sum / n.toDouble)
-      .flatTap(IO.println)
+      .map(_.fold(identity, identity))
+      .flatMap(_.parTraverse(q => fetchAuthorAge(q.author)))
+      .flatTap(ages => IO.println(ages))
       .as(ExitCode.Success)
+
   }
 }

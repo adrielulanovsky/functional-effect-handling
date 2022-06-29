@@ -21,7 +21,7 @@ object QueueExercise extends IOApp {
   }
 
   def saveImage(image: ImageInfo): IO[Unit] = {
-    IO.blocking {
+    IO.println(s"Saving image ${image.filepath}...") *> IO.blocking {
       val fp = image.filepath
       val newPath = s"${fp.substring(0, fp.length - 4)}_processed.jpg"
       ImageIO.write(image.image, "jpg", new File(s"$newPath"))
@@ -33,6 +33,7 @@ object QueueExercise extends IOApp {
     for {
       dir    <- IO.blocking(new File(directory))
       files  <- IO.blocking(dir.listFiles.toList.filter(f => f.isFile && f.getName.endsWith(".jpg")))
+      _ <- IO.println(s"Loading images from ${directory}...")
       images <- files.parTraverse(f => IO.blocking(ImageInfo(f.getAbsolutePath, ImageIO.read(f))))
     } yield images
   }
@@ -40,39 +41,33 @@ object QueueExercise extends IOApp {
   // TODO: Take a processed image from the and save it to the corresponding file
   def imageSaver(
     processedImageQueue: Queue[IO, ImageInfo]
-  ): IO[Unit] = {
-    IO.println(s"Creating imageSaver") *>
-    processedImageQueue.take.flatMap { image =>
-      IO.println(s"Saving image to ${image.filepath}")
-      saveImage(image)
-    }
-  }
+  ): IO[Unit] =
+    IO.println("creating image saver... ") *>
+      processedImageQueue.take.flatMap(saveImage)
 
   // TODO: Take a raw image from the queue, process it and put it in the processed queue
   def imageProcessor(
     rawImageQueue: Queue[IO, ImageInfo],
     processedImageQueue: Queue[IO, ImageInfo]
-  ): IO[Unit] = {
-    IO.println(s"Creating imageProcessor") *>
-    rawImageQueue.take.flatMap { image =>
-      val processedImage = processImage(image)
-
-      IO.println(s"Processing image: ${image.filepath}") *>
-      processedImageQueue.offer(processedImage)
-    }.foreverM
-  }
+  ): IO[Unit] =
+    IO.println("Creating imageProcessor...") *>
+    rawImageQueue
+      .take
+      .map(processImage)
+      .flatTap(img => IO.println(s"Processing image ${img.filepath}..."))
+      .flatMap(processedImageQueue.offer)
+      .foreverM
 
   // TODO: Load images from the dir and put them in the queue
   def imageLoader(
     srcDirectory: String,
     rawImageQueue: Queue[IO, ImageInfo]
-  ): IO[Unit] = {
-    IO.println(s"Creating imageLoader for directory $srcDirectory") *>
-    loadImages(srcDirectory).flatMap { images =>
-      IO.println(s"Loaded ${images.length} from directory $srcDirectory")
-      images.parTraverse_(rawImageQueue.offer)
-    }
-  }
+  ): IO[Unit] = IO.println(s"Creating imageLoader for directory ${srcDirectory}") *>
+    loadImages(srcDirectory)
+      .flatMap(images =>
+        IO.println(s"Loaded ${images.length} from directory $srcDirectory")
+        *> images.parTraverse_(rawImageQueue.offer)
+      )
 
   // TODO: Create the loaders, savers and processors and get them all running!
   def start(
@@ -80,16 +75,31 @@ object QueueExercise extends IOApp {
     noProcessors: Int,
     noSavers: Int
   ): IO[Unit] = {
-    Queue.unbounded[IO, ImageInfo].flatMap { rawImagesQueue =>
-      Queue.unbounded[IO, ImageInfo].flatMap { processedImagesQueue =>
-        val loaders = sourceDirs.map(dir => imageLoader(dir, rawImagesQueue))
-        val processors = List.range(0, noProcessors).map(_ => imageProcessor(rawImagesQueue, processedImagesQueue))
-        val savers = List.range(0, noSavers).map(_ => imageSaver(processedImagesQueue))
-        (loaders ++ processors ++ savers).parSequence_
+    //    val rawImageQueue = Queue.unbounded[IO, ImageInfo]
+    //    val processedImageQueue = Queue.unbounded[IO, ImageInfo]
+    //    (rawImageQueue, processedImageQueue).parMapN{(rawQueue, processedQueue) =>
+    Queue.unbounded[IO, ImageInfo].flatMap { rawQueue =>
+      Queue.unbounded[IO, ImageInfo].flatMap { processedQueue =>
+        val processing = (1 to noProcessors).toList.map(_ => imageProcessor(rawQueue, processedQueue))
+        val saving = (1 to noSavers).toList.map(_ => imageSaver(processedQueue))
+        val loading = sourceDirs.map(dir => imageLoader(dir, rawQueue))
+
+        //              val processing = IO.defer(
+        //                IO.println("a") *> (1 to noProcessors).toList.parTraverse_(_ => imageProcessor(rawQueue, processedQueue))
+        //              )
+        //              val saving = IO.defer(
+        //                IO.println("b") *> (1 to noSavers).toList.parTraverse_(_ => imageSaver(processedQueue))
+        //              )
+        //              val loading = IO.defer(
+        //                IO.println("c") *> sourceDirs.parTraverse_(dir => imageLoader(dir, rawQueue))
+        //              )
+        //              loading.both(processing).both(saving)
+        //              processing.both(saving).both(loading).void
+        //              (processing, saving, loading).parMapN((_, _, _) => ())
+        (processing ++ saving ++ loading).parSequence_
       }
     }
   }
-
   override def run(args: List[String]): IO[ExitCode] = {
     val dirs = List("kittens", "puppies")
     start(dirs, 16, 16).timeoutTo(30.seconds, IO.unit).as(ExitCode.Success)

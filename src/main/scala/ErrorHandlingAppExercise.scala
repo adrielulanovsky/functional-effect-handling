@@ -1,3 +1,4 @@
+import ErrorHandlingAppExercise.Service.{TextFileNotFound, countWords, loadFile}
 import cats._
 import cats.data.Validated.{Invalid, Valid}
 import cats.data.{EitherT, Validated, ValidatedNec}
@@ -35,6 +36,9 @@ object ErrorHandlingAppExercise extends IOApp {
     sealed trait DomainError
     case class TextFileNotFound(filename: String) extends DomainError
 
+    scala.io.Source.fromFile("adrielo.txt")
+      .getLines
+
     def countWords(contents: String): Int =
       contents.split("\\W+").length
 
@@ -57,17 +61,30 @@ object ErrorHandlingAppExercise extends IOApp {
       /* 1 */
       // Implement a load file function that loads all the contents of a file into a String
       // If the file does not exist, capture that with the domain error TextFileNotFound
-//      loadFileContents(filename).map { bytes =>
-//        new String(bytes).asRight[DomainError]
-//      }.handleErrorWith {
-//        case _: FileNotFoundException => TextFileNotFound(filename).asLeft[String].pure[IO]
-//        case t: Throwable => IO.raiseError(t)
-//      }
-      IO.raiseError(new StackOverflowError("boom"))
+      loadFileContents(filename)
+        .map(bytes => new String(bytes).asRight[DomainError])
+        .handleError(_ => TextFileNotFound(filename).asLeft[String])
     }
   }
 
   override def run(args: List[String]): IO[ExitCode] = {
+    val filename = args(0)
+    val result: IO[ExitCode] = Validations.validateFileName(filename) match {
+      case Valid(filename) =>
+        loadFile(filename).flatMap {
+          case Right(file) => IO.println(countWords(file)).as(ExitCode.Success)
+          case Left(TextFileNotFound(filename)) => IO.println(s"File ${filename} not found").as(ExitCode.Error)
+        }
+      case Invalid(errors) =>
+        IO.println(s"the following validation errors were found: \n${errors.mkString_("\n")}").as(ExitCode.Error)
+    }
+    result.handleErrorWith {
+      case NonFatal(e) =>
+        IO.println("Something went wrong").as(ExitCode.Error)
+      case e => IO.raiseError(e)
+    }
+  }
+
     import Validations._
     import Service._
     /* 2 */
@@ -78,22 +95,4 @@ object ErrorHandlingAppExercise extends IOApp {
     // If a domain error occurs, communicate it to the user via the console
     // If a technical, nonfatal error occurs, output "Something went wrong" to the console
     // If a fatal error occurs, just reraise it and let everything fail
-    (validateFileName(args(0)) match {
-      case Valid(filename) =>
-        loadFile(filename).flatMap {
-          case Right(contents) =>
-            val noWords = countWords(contents)
-            IO.println(s"Word count: $noWords").as(ExitCode.Success)
-
-          case Left(TextFileNotFound(filename)) =>
-            IO.println(s"Text file not found: $filename").as(ExitCode.Error)
-        }
-      case Invalid(errors) =>
-        IO.println(errors.mkString_("\n")).as(ExitCode.Error)
-    }).handleErrorWith {
-      case NonFatal(e) => IO.println("Something went wrong").as(ExitCode.Error)
-      case t: Throwable => IO.raiseError(t)
-    }
-  }
-
 }

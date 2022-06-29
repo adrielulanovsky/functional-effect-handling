@@ -10,7 +10,9 @@ object AsyncAppExercise extends IOApp {
     else                    cb(Left("Something went wrong"))
   }
 
-  def findUserIO(id: Long): IO[User] = ???
+  def findUserIO(id: Long): IO[User] = IO.async_( cb =>
+    findUser(id)(errorOrUser => cb(errorOrUser.leftMap(error => new Exception(error))) )
+  )
 
   override def run(args: List[String]): IO[ExitCode] = {
     findUserIO(5)

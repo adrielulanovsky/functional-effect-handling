@@ -6,9 +6,19 @@ import cats.effect.implicits._
 object ConcurrentSharedStateExercise extends IOApp {
   case class User(username: String, age: Int, friends: List[User])
 
+  def findOldestRef(user: User, ref: Ref[IO, User]): IO[Unit] = {
+    val handleRoot = ref.update { oldest =>
+      if (user.age > oldest.age) user
+      else oldest
+    }
+    val handleFriends = user.friends.parTraverse_(friend => findOldestRef(friend, ref))
+    handleRoot.both(handleFriends).void
+  }
   // use ref to hold the current oldest user
   def findOldest(user: User): IO[User] = {
-    ???
+    Ref.of[IO, User](user).flatMap { ref =>
+      findOldestRef(user, ref) *> ref.get
+    }
   }
 
   override def run(args: List[String]): IO[ExitCode] = {
